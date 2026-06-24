@@ -14,6 +14,8 @@ python3 red_teaming_evaluator.py \
   --eval-completion-tokens 1000 \
   --temperature 0.0 \
   --model deepseek/deepseek-v4-flash \
+  --openrouter-retries 3 \
+  --openrouter-retry-delay 2 \
   --output evaluations.jsonl
 
 # Adjust the above values if you want a different dataset, row count, or model.

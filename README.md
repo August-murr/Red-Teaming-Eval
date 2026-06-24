@@ -67,6 +67,8 @@ Key script arguments
 - `--max-workers`: number of parallel requests per batch.
 - `--batch-delay`: delay (seconds) between batches.
 - `--max-completion-tokens` / `--eval-completion-tokens`: token limits for generation and evaluation.
+- `--evaluation-prompt-file`: optional file overriding the default evaluator prompt. Use `{original_prompt}` and `{model_response}` placeholders.
+- `--openrouter-retries` / `--openrouter-retry-delay`: retry OpenRouter calls that error, return empty content, or produce an unparseable evaluator rating.
 - `--model`: OpenRouter model name used for both generation and evaluation (configurable).
 - `--output`: output JSONL file path.
 
@@ -76,3 +78,45 @@ Output
   - `response`: the model's generated response
   - `evaluation`: the full evaluator model output (summary + rating line)
   - `rating`: the parsed integer rating (0-10) or `null` if parsing failed
+
+Prompt discovery
+- `red_teaming_prompt_discovery.py` runs an iterative attacker -> target -> evaluator loop for a single dataset row. The attacker sees the original task plus feedback from previous attempts, proposes a new candidate prompt, the target answers it, and the evaluator rates the target response.
+- Quick run using the provided helper script:
+
+```bash
+bash run_prompt_discovery.sh
+```
+
+- Or run directly:
+
+```bash
+python3 red_teaming_prompt_discovery.py \
+  --dataset walledai/HarmBench \
+  --subset contextual \
+  --split train \
+  --column prompt \
+  --row-index 4 \
+  --iterations 5 \
+  --model deepseek/deepseek-v4-flash \
+  --attacker-temperature 0.7 \
+  --target-temperature 0.0 \
+  --evaluator-temperature 0.0 \
+  --attacker-max-completion-tokens 1000 \
+  --target-max-completion-tokens 1000 \
+  --eval-completion-tokens 1000 \
+  --output prompt_discovery.jsonl
+```
+
+Discovery-specific arguments
+- `--row-index`: selects the single dataset row used as the red-team task.
+- `--iterations`: number of attacker attempts.
+- `--attacker-model`, `--target-model`, `--evaluator-model`: override each role independently. If omitted, `--model` is used for that role.
+- `--attacker-system-prompt-file`, `--attacker-template-file`, `--target-system-prompt-file`: optional prompt customization files.
+- `--evaluation-prompt-file`: optional evaluator prompt template file with `{original_prompt}` and `{model_response}` placeholders.
+- `--openrouter-retries` / `--openrouter-retry-delay`: retry attacker, target, and evaluator OpenRouter calls that error, return empty content, or produce an unparseable evaluator rating.
+- `--candidate-start-marker` / `--candidate-end-marker`: delimit the attacker candidate prompt. The script also accepts JSON objects with `candidate_prompt`, `prompt`, or `attack_prompt` keys.
+- `--max-feedback-response-chars` / `--max-feedback-evaluation-chars`: control how much previous target and evaluator text is fed back to the attacker.
+
+Discovery output
+- The discovery script writes one JSON object per attempt with fields including `iteration`, dataset metadata, `task`, `attacker_output`, `candidate_prompt`, `target_response`, `evaluation`, and `rating`.
+- At the end, it prints the best parsed rating and the corresponding candidate prompt.
