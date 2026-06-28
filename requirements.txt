@@ -1,2 +1,3 @@
 openrouter
 datasets
+matplotlib

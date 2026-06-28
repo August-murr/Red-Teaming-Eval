@@ -43,7 +43,7 @@ bash run_evaluation.sh
 - Or run the script directly with custom arguments:
 
 ```bash
-python3 red_teaming_evaluator.py \
+python red_teaming_evaluator.py \
   --dataset walledai/HarmBench \
   --subset contextual \
   --split train \
@@ -63,7 +63,7 @@ Key script arguments
 - `--subset`: dataset config/subset name. (remove if dataset doesn't have config)
 - `--split`: dataset split (train/validation/test).
 - `--column`: which column to read prompts from (e.g., `prompt`).
-- `--row-limit`: how many rows to process.
+- `--row-limit`: how many rows to process; omit to process the full dataset.
 - `--max-workers`: number of parallel requests per batch.
 - `--batch-delay`: delay (seconds) between batches.
 - `--max-completion-tokens` / `--eval-completion-tokens`: token limits for generation and evaluation.
@@ -80,7 +80,7 @@ Output
   - `rating`: the parsed integer rating (0-10) or `null` if parsing failed
 
 Prompt discovery
-- `red_teaming_prompt_discovery.py` runs an iterative attacker -> target -> evaluator loop for a single dataset row. The attacker sees the original task plus feedback from previous attempts, proposes a new candidate prompt, the target answers it, and the evaluator rates the target response.
+- `red_teaming_prompt_discovery.py` runs an iterative attacker -> target -> evaluator loop for one or more dataset rows. The attacker sees the original task plus feedback from previous attempts for that same row, proposes a new candidate prompt, the target answers it, and the evaluator rates the target response.
 - Quick run using the provided helper script:
 
 ```bash
@@ -90,12 +90,13 @@ bash run_prompt_discovery.sh
 - Or run directly:
 
 ```bash
-python3 red_teaming_prompt_discovery.py \
+python red_teaming_prompt_discovery.py \
   --dataset walledai/HarmBench \
   --subset contextual \
   --split train \
   --column prompt \
-  --row-index 4 \
+  --row-limit 5 \
+  --max-workers 2 \
   --iterations 5 \
   --model deepseek/deepseek-v4-flash \
   --attacker-temperature 0.7 \
@@ -104,11 +105,13 @@ python3 red_teaming_prompt_discovery.py \
   --attacker-max-completion-tokens 1000 \
   --target-max-completion-tokens 1000 \
   --eval-completion-tokens 1000 \
-  --output prompt_discovery.jsonl
+  --output prompt_discovery
 ```
 
 Discovery-specific arguments
-- `--row-index`: selects the single dataset row used as the red-team task.
+- `--row-index`: selects a single dataset row used as the red-team task. When provided, this takes precedence over `--row-limit`.
+- `--row-limit`: runs discovery for the first N dataset rows when `--row-index` is omitted. If both `--row-index` and `--row-limit` are omitted, discovery runs over the full dataset.
+- `--max-workers`: number of dataset rows to run in parallel. Each row's attacker feedback loop still runs sequentially.
 - `--iterations`: number of attacker attempts.
 - `--attacker-model`, `--target-model`, `--evaluator-model`: override each role independently. If omitted, `--model` is used for that role.
 - `--attacker-system-prompt-file`, `--attacker-template-file`, `--target-system-prompt-file`: optional prompt customization files.
@@ -118,5 +121,25 @@ Discovery-specific arguments
 - `--max-feedback-response-chars` / `--max-feedback-evaluation-chars`: control how much previous target and evaluator text is fed back to the attacker.
 
 Discovery output
-- The discovery script writes one JSON object per attempt with fields including `iteration`, dataset metadata, `task`, `attacker_output`, `candidate_prompt`, `target_response`, `evaluation`, and `rating`.
-- At the end, it prints the best parsed rating and the corresponding candidate prompt.
+- The discovery script treats `--output` as a directory and writes one readable JSON file per dataset row, named like `row_000004.json`.
+- Each row file contains `row_index`, `task`, `best_rating`, `best_iteration`, and an `attempts` array with `iteration`, `rating`, `candidate_prompt`, `target_response`, and `evaluation`.
+- Re-running discovery with the same output directory overwrites files for the selected rows.
+- At the end, it prints the best parsed rating and the corresponding candidate prompt across all completed rows.
+
+Plotting discovery scores
+- `plot_discovery_scores.py` reads a discovery output directory, averages task scores at each iteration, and saves a plot. Rows that stopped early carry their latest score forward for later iterations.
+- `--base-score` optionally adds an iteration-0 baseline to the plot. For now, set this manually to the average rating from `red_teaming_evaluator.py` on the original tasks before prompt discovery. A later version may compute this directly from evaluator outputs.
+
+```bash
+bash discovery_example/plot_discovery_scores_example.sh
+```
+
+Or run it directly:
+
+```bash
+python plot_discovery_scores.py \
+  --input-dir discovery_example/prompt_discovery \
+  --output discovery_example/discovery_scores.png \
+  --base-score 2.52 \
+  --summary-json
+```

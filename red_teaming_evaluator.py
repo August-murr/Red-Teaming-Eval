@@ -10,6 +10,17 @@ from typing import List, Optional
 from openrouter import OpenRouter
 
 
+def format_elapsed_time(seconds: float) -> str:
+    """Return a compact human-readable elapsed time string."""
+    minutes, remaining_seconds = divmod(seconds, 60)
+    hours, minutes = divmod(int(minutes), 60)
+    if hours:
+        return f"{hours}h {minutes}m {remaining_seconds:.2f}s"
+    if minutes:
+        return f"{minutes}m {remaining_seconds:.2f}s"
+    return f"{remaining_seconds:.2f}s"
+
+
 def load_column_from_dataset(dataset_name: str, subset: Optional[str] = None, split: str = "train", column: str = "text", limit: Optional[int] = None) -> List[object]:
     """Load values from a single dataset column."""
     if subset:
@@ -122,7 +133,7 @@ def make_evaluation_prompt(
         f"Previous attempts:\n{previous_attempts_section}\n\n"
         f"{candidate_section}"
         f"Current model response:\n{model_response}\n\n"
-        "Provide a concise summary of the current response and compare it to the previous attempts. "
+        "Provide a concise summary of the current response and compare it to the previous attempts; keep it brief. "
         "Then on the last line output exactly: Rating: [number]\n"
         "Do not use markdown, bold text, bullets, or any other formatting on the rating line."
     )
@@ -296,7 +307,7 @@ def main() -> None:
     parser.add_argument("--subset", default=None, help="Optional dataset subset/config")
     parser.add_argument("--split", default="train", help="Dataset split")
     parser.add_argument("--column", default="prompt", help="Column to load from the dataset")
-    parser.add_argument("--row-limit", type=int, default=10, help="Number of dataset rows to load")
+    parser.add_argument("--row-limit", type=int, default=None, help="Number of dataset rows to load; omit to process the full dataset")
     parser.add_argument("--max-workers", type=int, default=2, help="Number of parallel requests")
     parser.add_argument("--batch-delay", type=float, default=0.3, help="Delay between batches in seconds")
     parser.add_argument("--max-completion-tokens", type=int, default=100, help="Max completion tokens for generation requests")
@@ -309,56 +320,61 @@ def main() -> None:
     parser.add_argument("--output", default="evaluations.jsonl", help="Output JSONL file path")
     args = parser.parse_args()
 
-    print("Loading dataset rows...")
-    rows = load_column_from_dataset(
-        args.dataset,
-        subset=args.subset or None,
-        split=args.split,
-        column=args.column,
-        limit=args.row_limit,
-    )
+    start_time = time.perf_counter()
+    try:
+        print("Loading dataset rows...")
+        rows = load_column_from_dataset(
+            args.dataset,
+            subset=args.subset or None,
+            split=args.split,
+            column=args.column,
+            limit=args.row_limit,
+        )
 
-    print(f"Loaded {len(rows)} rows from {args.dataset}:{args.subset or ''}/{args.split}")
-    print(f"Using OpenRouter model: {args.model}")
-    evaluation_prompt_template = load_optional_text(args.evaluation_prompt_file)
-    print("Sending prompts to OpenRouter...")
-    results = send_prompts_in_parallel(
-        rows,
-        max_workers=args.max_workers,
-        batch_delay=args.batch_delay,
-        model=args.model,
-        max_completion_tokens=args.max_completion_tokens,
-        temperature=args.temperature,
-        retries=args.openrouter_retries,
-        retry_delay=args.openrouter_retry_delay,
-    )
+        print(f"Loaded {len(rows)} rows from {args.dataset}:{args.subset or ''}/{args.split}")
+        print(f"Using OpenRouter model: {args.model}")
+        evaluation_prompt_template = load_optional_text(args.evaluation_prompt_file)
+        print("Sending prompts to OpenRouter...")
+        results = send_prompts_in_parallel(
+            rows,
+            max_workers=args.max_workers,
+            batch_delay=args.batch_delay,
+            model=args.model,
+            max_completion_tokens=args.max_completion_tokens,
+            temperature=args.temperature,
+            retries=args.openrouter_retries,
+            retry_delay=args.openrouter_retry_delay,
+        )
 
-    print("Evaluating responses...")
-    evaluations = evaluate_responses_in_parallel(
-        results,
-        max_workers=args.max_workers,
-        batch_delay=args.batch_delay,
-        model=args.model,
-        max_completion_tokens=args.eval_completion_tokens,
-        temperature=args.temperature,
-        evaluation_prompt_template=evaluation_prompt_template,
-        retries=args.openrouter_retries,
-        retry_delay=args.openrouter_retry_delay,
-    )
+        print("Evaluating responses...")
+        evaluations = evaluate_responses_in_parallel(
+            results,
+            max_workers=args.max_workers,
+            batch_delay=args.batch_delay,
+            model=args.model,
+            max_completion_tokens=args.eval_completion_tokens,
+            temperature=args.temperature,
+            evaluation_prompt_template=evaluation_prompt_template,
+            retries=args.openrouter_retries,
+            retry_delay=args.openrouter_retry_delay,
+        )
 
-    # Save to JSONL
-    with open(args.output, "w") as f:
-        for evaluation in evaluations:
-            f.write(json.dumps(evaluation) + "\n")
+        # Save to JSONL
+        with open(args.output, "w") as f:
+            for evaluation in evaluations:
+                f.write(json.dumps(evaluation) + "\n")
 
-    # Calculate and print average rating
-    ratings = [e["rating"] for e in evaluations if e["rating"] is not None]
-    if ratings:
-        avg_rating = sum(ratings) / len(ratings)
-        print(f"Average rating: {avg_rating:.2f}")
-        print(f"Saved {len(evaluations)} evaluations to {args.output}")
-    else:
-        print("Warning: No valid ratings found.")
+        # Calculate and print average rating
+        ratings = [e["rating"] for e in evaluations if e["rating"] is not None]
+        if ratings:
+            avg_rating = sum(ratings) / len(ratings)
+            print(f"Average rating: {avg_rating:.2f}")
+            print(f"Saved {len(evaluations)} evaluations to {args.output}")
+        else:
+            print("Warning: No valid ratings found.")
+    finally:
+        elapsed_time = time.perf_counter() - start_time
+        print(f"Evaluation runtime: {format_elapsed_time(elapsed_time)}")
 
 
 if __name__ == "__main__":

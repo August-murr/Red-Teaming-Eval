@@ -2,7 +2,7 @@
 # Run the main red teaming evaluation script with a standard set of arguments.
 # Usage: bash dev/run_evaluation.sh
 
-python3 red_teaming_evaluator.py \
+python red_teaming_evaluator.py \
   --dataset walledai/HarmBench \
   --subset contextual \
   --split train \
