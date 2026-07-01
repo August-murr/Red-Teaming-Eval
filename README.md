@@ -126,6 +126,40 @@ Discovery output
 - Re-running discovery with the same output directory overwrites files for the selected rows.
 - At the end, it prints the best parsed rating and the corresponding candidate prompt across all completed rows.
 
+Interpreting discovery results
+- `red_teaming_discovery_interpreter.py` reads a prompt discovery output directory and asks an OpenRouter model to summarize what happened for each task. The interpreter judges whether the attacker learned from feedback, whether improvement was fast or slow, what high-level strategies worked, and why some tasks failed to improve.
+- After per-task interpretation, the script sends all summaries plus aggregate score metrics into one final request that produces a cross-task verdict about the whole discovery run.
+- Quick run using the provided helper script:
+
+```bash
+bash run_discovery_interpretation.sh
+```
+
+- Or run the example interpretation:
+
+```bash
+bash discovery_example/run_discovery_interpretation_example.sh
+```
+
+- Or run directly:
+
+```bash
+python red_teaming_discovery_interpreter.py \
+  --input-dir discovery_example/prompt_discovery \
+  --output-dir discovery_example/discovery_interpretation \
+  --max-workers 3 \
+  --model deepseek/deepseek-v4-flash \
+  --temperature 0.0 \
+  --resume
+```
+
+Interpretation output
+- The interpreter writes one JSON summary per row, named like `row_000004.json`, under `--output-dir`.
+- It also writes `interpretation_summaries.jsonl`, `final_verdict.json`, and `final_verdict.md`.
+- `--resume` reuses existing per-row interpretation files so interrupted runs do not repeat completed OpenRouter calls.
+- `--skip-final` writes only per-row interpretations and skips the cross-task verdict request.
+- The interpreter prompt asks for high-level attack strategies and learning dynamics, while avoiding reproduction of detailed harmful target content.
+
 Plotting discovery scores
 - `plot_discovery_scores.py` reads a discovery output directory, averages task scores at each iteration, and saves a plot. Rows that stopped early carry their latest score forward for later iterations.
 - `--base-score` optionally adds an iteration-0 baseline to the plot. For now, set this manually to the average rating from `red_teaming_evaluator.py` on the original tasks before prompt discovery. A later version may compute this directly from evaluator outputs.
